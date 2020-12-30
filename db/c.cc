@@ -17,6 +17,7 @@
 #include "leveldb/status.h"
 #include "leveldb/write_batch.h"
 
+// namespace leveldb
 using leveldb::Cache;
 using leveldb::Comparator;
 using leveldb::CompressionType;
@@ -117,6 +118,7 @@ struct leveldb_filterpolicy_t : public FilterPolicy {
       key_sizes[i] = keys[i].size();
     }
     size_t len;
+    // create filter 根据起始地址和偏移n
     char* filter = (*create_)(state_, &key_pointers[0], &key_sizes[0], n, &len);
     dst->append(filter, len);
     free(filter);
@@ -147,18 +149,18 @@ static bool SaveError(char** errptr, const Status& s) {
   if (s.ok()) {
     return false;
   } else if (*errptr == nullptr) {
-    *errptr = strdup(s.ToString().c_str());
+    *errptr = strdup(s.ToString().c_str());  // 将s.ToString()赋值给c.str()在c语言中没有string类型，故必须通过string类对象的成员函数c_str()把string 对象转换成c中的字符串样式。
   } else {
     // TODO(sanjay): Merge with existing error?
     free(*errptr);
     *errptr = strdup(s.ToString().c_str());
   }
   return true;
-}
+} 
 
 static char* CopyString(const std::string& str) {
   char* result = reinterpret_cast<char*>(malloc(sizeof(char) * str.size()));
-  std::memcpy(result, str.data(), sizeof(char) * str.size());
+  std::memcpy(result, str.data(), sizeof(char) * str.size()); // 将str.data()赋值给result,std::memcpy
   return result;
 }
 
