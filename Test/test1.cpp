@@ -21,7 +21,7 @@ int main(){
 
         keys << "itworld123-" << count;
         key = keys.str();
-        status = db->Put(leveldb::WriteOptions(), key, value);//添加内容
+        status = db->Put(leveldb::WriteOptions(), key, value);//写入
         assert(status.ok());
 
         status = db->Get(leveldb::ReadOptions(), key, &value);//获取

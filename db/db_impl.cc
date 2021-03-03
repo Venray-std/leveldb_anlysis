@@ -316,7 +316,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     }
   }
 
-  s = versions_->Recover(save_manifest);
+  s = versions_->Recover(save_manifest);    // 得到需要恢复的version并加入version_set，version记录一些文件信息， versionEdit记录操作。利用version和Edit就可以恢复文件信息
   if (!s.ok()) {
     return s;
   }
@@ -332,23 +332,24 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   const uint64_t min_log = versions_->LogNumber();
   const uint64_t prev_log = versions_->PrevLogNumber();
   std::vector<std::string> filenames;
-  s = env_->GetChildren(dbname_, &filenames);
+  s = env_->GetChildren(dbname_, &filenames);   // filenames 是dbname_下的所有文件，包括CURRENT, MANIFEST,LOG等
   if (!s.ok()) {
     return s;
   }
   std::set<uint64_t> expected;
-  versions_->AddLiveFiles(&expected);
+  versions_->AddLiveFiles(&expected);   // 根据version得到需要回复的文件
   uint64_t number;
   FileType type;
   std::vector<uint64_t> logs;
-  for (size_t i = 0; i < filenames.size(); i++) {
+  
+  for (size_t i = 0; i < filenames.size(); i++) { //找出所有满足条件的filename文件。
     if (ParseFileName(filenames[i], &number, &type)) {
-      expected.erase(number);
-      if (type == kLogFile && ((number >= min_log) || (number == prev_log)))
+      expected.erase(number);   // 如果能解析，先擦除
+      if (type == kLogFile && ((number >= min_log) || (number == prev_log)))    // 如果是日志文件，且日期满足要求添加之
         logs.push_back(number);
     }
   }
-  if (!expected.empty()) {
+  if (!expected.empty()) {    // 如果数组为空，说明文件都可以被解析
     char buf[50];
     std::snprintf(buf, sizeof(buf), "%d missing files; e.g.",
                   static_cast<int>(expected.size()));
@@ -356,7 +357,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   }
 
   // Recover in the order in which the logs were generated
-  std::sort(logs.begin(), logs.end());
+  std::sort(logs.begin(), logs.end());    // 按日期顺序恢复日志。
   for (size_t i = 0; i < logs.size(); i++) {
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
                        &max_sequence);
@@ -1116,12 +1117,12 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     snapshot =
         static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number();
   } else {
-    snapshot = versions_->LastSequence();
+    snapshot = versions_->LastSequence();   // sequence number,每当插入一条记录时，都会插入一个独一无二的序列号，而且这个序列号是递增的。sequence之前的数据也就是snapshot
   }
 
   MemTable* mem = mem_;
   MemTable* imm = imm_;
-  Version* current = versions_->current();
+  Version* current = versions_->current();    // version中有sst的信息
   mem->Ref();
   if (imm != nullptr) imm->Ref();
   current->Ref();
@@ -1134,12 +1135,12 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
     LookupKey lkey(key, snapshot);
-    if (mem->Get(lkey, value, &s)) {
+    if (mem->Get(lkey, value, &s)) {  //先查找memtable
       // Done
     } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
       // Done
     } else {
-      s = current->Get(options, lkey, value, &stats);
+      s = current->Get(options, lkey, value, &stats);  //查找sstable
       have_stat_update = true;
     }
     mutex_.Lock();
@@ -1203,16 +1204,16 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   while (!w.done && &w != writers_.front()) {
     w.cv.Wait();
   }
-  if (w.done) {
+  if (w.done) {   // 获得锁后查看其他线程是否完成写，如完成则不需要再写
     return w.status;
   }
 
   // May temporarily unlock and wait.
-  Status status = MakeRoomForWrite(updates == nullptr);
-  uint64_t last_sequence = versions_->LastSequence();
+  Status status = MakeRoomForWrite(updates == nullptr);     // 是否空间足够写
+  uint64_t last_sequence = versions_->LastSequence();   // 设置写入的sequenceNumber
   Writer* last_writer = &w;
   if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions
-    WriteBatch* write_batch = BuildBatchGroup(&last_writer);
+    WriteBatch* write_batch = BuildBatchGroup(&last_writer);    // 将Writer的数据形成WriteBatch
     WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
     last_sequence += WriteBatchInternal::Count(write_batch);
 
@@ -1220,6 +1221,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // during this phase since &w is currently responsible for logging
     // and protects against concurrent loggers and concurrent writes
     // into mem_.
+    // 写入log文件,包括sequence,操作count,每次操作的类型(Put/Delete)，key/value及其长度
     {
       mutex_.Unlock();
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
@@ -1231,7 +1233,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
         }
       }
       if (status.ok()) {
-        status = WriteBatchInternal::InsertInto(write_batch, mem_);
+        status = WriteBatchInternal::InsertInto(write_batch, mem_);   // 插入MemTable中，注意是写入log文件之后
       }
       mutex_.Lock();
       if (sync_error) {
@@ -1243,7 +1245,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     }
     if (write_batch == tmp_batch_) tmp_batch_->Clear();
 
-    versions_->SetLastSequence(last_sequence);
+    versions_->SetLastSequence(last_sequence);  // 设置Sequence number
   }
 
   while (true) {
@@ -1483,9 +1485,10 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   VersionEdit edit;
   // Recover handles create_if_missing, error_if_exists
   bool save_manifest = false;
-  Status s = impl->Recover(&edit, &save_manifest);
+  Status s = impl->Recover(&edit, &save_manifest);    // 恢复version和log
+
   if (s.ok() && impl->mem_ == nullptr) {
-    // Create new log and a corresponding memtable.
+    // Create new log and a corresponding memtable. 创建新的log文件
     uint64_t new_log_number = impl->versions_->NewFileNumber();
     WritableFile* lfile;
     s = options.env->NewWritableFile(LogFileName(dbname, new_log_number),
@@ -1502,10 +1505,10 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   if (s.ok() && save_manifest) {
     edit.SetPrevLogNumber(0);  // No older logs needed after recovery.
     edit.SetLogNumber(impl->logfile_number_);
-    s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
+    s = impl->versions_->LogAndApply(&edit, &impl->mutex_);   // 在恢复过程中产生了新的文件，那么就会产生VersionEdit，从而需要LogAndApply
   }
   if (s.ok()) {
-    impl->RemoveObsoleteFiles();
+    impl->RemoveObsoleteFiles();    // 删除多余的文件
     impl->MaybeScheduleCompaction();
   }
   impl->mutex_.Unlock();

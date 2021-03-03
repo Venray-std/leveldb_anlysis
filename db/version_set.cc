@@ -860,6 +860,12 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 }
 
 Status VersionSet::Recover(bool* save_manifest) {
+  /**
+   * 利用版本version和versionEdit恢复数据库
+   * (1) 通过CURRENT文件找到manifest，manifest记录versionEdit
+   * (2) 将读入的versionEdit apply到旧version，得到当前的version。实际通过build一次性得到所有versionEdit的综合
+   * (3) 得到需要恢复的version, 将当前version添加到version_set, version_set永不改变。
+   * */
   struct LogReporter : public log::Reader::Reporter {
     Status* status;
     void Corruption(size_t bytes, const Status& s) override {
@@ -878,9 +884,9 @@ Status VersionSet::Recover(bool* save_manifest) {
   }
   current.resize(current.size() - 1);
 
-  std::string dscname = dbname_ + "/" + current;
+  std::string dscname = dbname_ + "/" + current;    // dscname is path of manifest, current is manifest writed in CURRENT
   SequentialFile* file;
-  s = env_->NewSequentialFile(dscname, &file);
+  s = env_->NewSequentialFile(dscname, &file);   // new file,manifest文件里面存放的就是一个一个的version_edit
   if (!s.ok()) {
     if (s.IsNotFound()) {
       return Status::Corruption("CURRENT points to a non-existent file",
@@ -897,7 +903,7 @@ Status VersionSet::Recover(bool* save_manifest) {
   uint64_t last_sequence = 0;
   uint64_t log_number = 0;
   uint64_t prev_log_number = 0;
-  Builder builder(this, current_);
+  Builder builder(this, current_);  // VersionSet::Builder的作用就是直接把所有的VersionEdit，Apply到VersionSet上面。最后形成一个version。中间过程中的各种Version就没有必要保留了。
 
   {
     LogReporter reporter;
@@ -919,7 +925,7 @@ Status VersionSet::Recover(bool* save_manifest) {
       }
 
       if (s.ok()) {
-        builder.Apply(&edit);
+        builder.Apply(&edit);   // VersionEdit不断apply到build中
       }
 
       if (edit.has_log_number_) {
@@ -964,11 +970,11 @@ Status VersionSet::Recover(bool* save_manifest) {
   }
 
   if (s.ok()) {
-    Version* v = new Version(this);
-    builder.SaveTo(v);
-    // Install recovered version
-    Finalize(v);
-    AppendVersion(v);
+    Version* v = new Version(this);   // new version
+    builder.SaveTo(v);  // 用build形成一个综合version
+    // Install recovered version  
+    Finalize(v);  // 判断version中哪些文件需要合并
+    AppendVersion(v);   // 把综合version放到VersionSet里面。
     manifest_file_number_ = next_file;
     next_file_number_ = next_file + 1;
     last_sequence_ = last_sequence;
