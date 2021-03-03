@@ -7,4 +7,6 @@
 build/
 out/
 
+.vscode/
 Test/testdb*/
+Test/build/

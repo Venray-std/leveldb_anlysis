@@ -21,5 +21,5 @@ link_directories(lib)  # 库文件目录
 
 include_directories(include)  #头文件路径
 # 添加可执行文件
-add_executable(test2 test2.cpp)
-target_link_libraries(test2 libleveldb.a -pthread)
+add_executable(test1 test1.cpp)
+target_link_libraries(test1 libleveldb.a -pthread)
